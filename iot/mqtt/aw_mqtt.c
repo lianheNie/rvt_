@@ -572,9 +572,10 @@ static int aw_mqtt_build_net() {
   res = aw_mqtt_net_led(0);
   res = aw_mqtt_set_alive(KeepAliveTime);
 #ifndef IS_USE_NB_POWERDOWN
-  res = aw_mqtt_set_will_f(QOS1_LEASET_ONCE, NO_RETAIN,
-                           "{" CONNECT_CNT ":0," DEV_TYPE
-                           ":" AW_STR(AW_DEV_TYPE) "}",
+  char data_str[23] = {'\0'};
+  snprintf(data_str, sizeof(data_str), "{i:%d,con:0,y:%d}", AW_DEV_SELF_ADDRESS,
+           AW_DEV_TYPE);
+  res = aw_mqtt_set_will_f(QOS1_LEASET_ONCE, NO_RETAIN, data_str,
                            "%s/%s/" AW_NOTIFY "", DevName, DevId);
 #endif
 
@@ -584,7 +585,6 @@ static int aw_mqtt_build_net() {
   }
 
   res = aw_mqtt_close();
-
   res = aw_mqtt_open(Host, PortNum);
   if (AW_OK != res) {
     return AW_ERR;
@@ -618,9 +618,11 @@ static int aw_mqtt_rebuild_net() {
   if (AW_OK != res) {
     return AW_ERR;
   }
-  res = aw_mqtt_sub_f(QOS1_LEASET_ONCE, "%s/%s/cmd", DevName, DevId);
-  if (AW_OK != res) {
-    return AW_ERR;
+  if (_is_sub == 1) {
+    res = aw_mqtt_sub_f(QOS1_LEASET_ONCE, "%s/%s/cmd", DevName, DevId);
+    if (AW_OK != res) {
+      return AW_ERR;
+    }
   }
   return AW_OK;
 }
@@ -712,7 +714,6 @@ static s8 aw_mqtt_pub(aw_qos_t qos, u8 retain, const char *topic,
   at_resp_status_t rsp_sts =
       aw_at_exec_cmd(AT_DEFAULT_TIMEOUT, "AT+QMTPUB=%d,%d,%d,%d,\"%s\",%d\r\n",
                      ConnectID_0, msgId, (int)qos, (int)retain, topic, msg_len);
-
   if (AT_RESP_OK == rsp_sts) {
     aw_at_response_set_line(AW_MQTT_SUCC_LINE_NUM);
     rsp_sts = aw_at_exec_cmd(AT_DEFAULT_TIMEOUT, msg);
@@ -849,22 +850,25 @@ int aw_mqtt_pub_status() {
   return res;
 }
 
-int aw_mqtt_net_building() {
+int aw_mqtt_net_building(aw_mqtt_mode_t mode, u8 isPub, char *dev_name) {
   aw_mqtt_connecting();
+  if (isPub > 0) {
 #ifdef _IS_USE_STATIS
-  return aw_mqtt_pub_f(
-      AW_PUB_MODAL, QOS1_LEASET_ONCE, NO_RETAIN,
-      aw_mqtt_topic_get_f("" AW_MQTT_DEV_NAME "/%s/" AW_NOTIFY "",
-                          AW_MQTT_DEV_ID),
-      "{" CONNECT_CNT ":%d," RESET_NB ":%d," CSQ ":%d," DEV_TYPE
-      ":%d," AW_VERSION ":\"%s\"}",
-      _statis.connect_ok_cnt, _statis.reset_cnt, aw_mqtt_get_csq(), AW_DEV_TYPE,
-      AW_firmware_version);
+    return aw_mqtt_pub_f(
+        AW_PUB_MODAL, QOS1_LEASET_ONCE, NO_RETAIN,
+        aw_mqtt_topic_get_f("%s/%s/" AW_NOTIFY "", dev_name, AW_MQTT_DEV_ID),
+        "{i:%d," CONNECT_CNT ":%d," RESET_NB ":%d," CSQ ":%d," DEV_TYPE
+        ":%d,mod:%d," AW_VERSION ":\"%s\"}",
+        AW_DEV_SELF_ADDRESS, _statis.connect_ok_cnt, _statis.reset_cnt,
+        aw_mqtt_get_csq(), AW_DEV_TYPE, mode, AW_firmware_version);
 #else
-  return aw_mqtt_pub_f(AW_PUB_MODAL, QOS1_LEASET_ONCE, NO_RETAIN, "nty",
-                       "{\"CON\":\"%d\"}", 1);
+    return aw_mqtt_pub_f(AW_PUB_MODAL, QOS1_LEASET_ONCE, NO_RETAIN, "nty",
+                         "{\"CON\":\"%d\"}", 1);
 #endif
+  }
+  return 0;
 }
+
 int aw_mqtt_init(AwCallBack_char_t funcRecv, AwCallBack_char_t funcStat) {
   _resp_sem_init();
   aw_at_urc_table_set(funcRecv, funcStat);
@@ -874,7 +878,7 @@ int aw_mqtt_init(AwCallBack_char_t funcRecv, AwCallBack_char_t funcStat) {
 int aw_mqtt_reset(u8 is_connect) {
   aw_mqtt_reboot();
   if (is_connect) {
-    aw_mqtt_net_building();
+    aw_mqtt_net_building(AW_MQTT_NORMAL, 1, AW_MQTT_DEV_NAME);
   }
   return 0;
 }

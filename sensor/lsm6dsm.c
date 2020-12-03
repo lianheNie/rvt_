@@ -212,6 +212,7 @@ static void _reset() {
 }
 
 #define _LSM6DSM_CAL_SIZE 128
+s16* lsm6dsm_get_bias() { return _acc_bias; }
 s16* lsm6dsm_calibration() {
   u8 ii = 0;
   int32_t sum[3] = {0, 0, 0};

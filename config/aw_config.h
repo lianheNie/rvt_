@@ -56,7 +56,7 @@
 #define IS_USE_4X4_PACKAGE  // 4X4封裝
 #endif
 ///////////////////////////////////////////////////////////////////////////
-#define AW_DEV_SELF_ADDRESS 2107       // 1103        //   36 设备地址
+#define AW_DEV_SELF_ADDRESS 2102       // 1103        //   36 设备地址
 #define AW_DEV_PAIR_DEFAULT_ADDRESS 0  //设备配对地址
 #define AW_MQTT_HOST "106.14.123.177"  //"106.14.192.13"
 #define AW_MQTT_DEV_NAME "GAT"
@@ -136,8 +136,15 @@
 
 #if AW_DEV_TYPE == AW_devtype_rv || AW_DEV_TYPE == AW_devtype_rvt || \
     AW_DEV_TYPE == AW_devtype_rt
+#define IS_USE_POWER_CTL  //启用电源控制(电源开关+电源ADC)
+
+#ifdef IS_USE_POWER_CTL
+//#define IS_USE_POWER_SWITCH  //启用电源控制(电源开关+电源ADC)
+#define IS_USE_POWER_ADC  //启用电源控制(电源开关+电源ADC)
+#endif
 #undef IS_USE_EASYLINK
 #undef IS_USE_RX
+
 #endif
 
 #if AW_DEV_TYPE <= AW_devtype_gateway_rs_3_cur_bat ||                \
@@ -149,7 +156,7 @@
 #ifdef IS_USE_MQTT
 #define IS_USE_AT_CLIENT
 #define IS_USE_MQTT_TIMER
-//#define IS_USE_NB_POWERDOWN
+#define IS_USE_NB_POWERDOWN
 //#define IS_USE_BC26
 #endif
 #endif

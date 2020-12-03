@@ -131,15 +131,13 @@
 #define DEV_TYPE "y"
 #define AW_VERSION "ver"
 
-
 #define SERVER_IP "sip"        //服务器配置
 #define RVT_REPORT_TIME "rpt"  //上报周期
 #define GET_VIBR "grv"         //获取振动数据
+#define AXIS_VIBR "axv"        //轴振动数据选择
 #define GET_TEMP "grt"         //获取温度数据
 #define VIBR_BIAS "vbs"        //振动校准
 #define TEMP_BIAS "tbs"        //温度校准
-
-
 
 enum at_resp_status {
   AT_RESP_OK = 0,         /* AT response end is OK */
@@ -191,6 +189,11 @@ typedef enum {
   AW_PUB_NOMODAL,  // 非模态
   AW_PUB_MODAL     // 模态
 } aw_pub_type_t;
+typedef enum {
+  AW_MQTT_NORMAL,  // 正常模式
+  AW_MQTT_SLEEP,   // 休眠模式
+  AW_MQTT_CONFIG   // 配置模式
+} aw_mqtt_mode_t;
 
 typedef enum {
   NO_RETAIN,    // At most once

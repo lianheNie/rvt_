@@ -17,7 +17,7 @@
 #endif
 #include "i2c_driver.h"
 #define numSamples LSM6DSM_FIFO_DEPTH / 3  // 1024
-static int16_t _zArray[numSamples];
+static s16 _axisArray[numSamples];
 static bmi160_sensor_data_t _acc_data;
 // msp_fft_q15_params params = {numSamples, true,
 // msp_cmplx_bitrev_table_2048_ui16,
@@ -70,7 +70,8 @@ s16* aw_vibration_calibration() {
   return NULL;
 #endif
 }
-void aw_vibration_process(s16 tempt) {
+s16* aw_vibration_get_bias() { return lsm6dsm_get_bias(); }
+void aw_vibration_process(E_xyz_axis_t axis, s16 tempt, u16 bat) {
 #ifndef IS_USE_ACC_FIFO
   GPTimerCC26XX_Params timerParams;
   GPTimerCC26XX_Params_init(&timerParams);
@@ -90,8 +91,7 @@ void aw_vibration_process(s16 tempt) {
 #else
   bmi160_accel_enable(1);
 #endif
-
-  aw_delay_ms(1000);
+  aw_delay_ms(500);
 #ifndef IS_USE_ACC_FIFO
   GPTimerCC26XX_start(_hTimer);
   while (_data_cnt < numSamples)  // Wait for timer interrupt for each sample
@@ -106,9 +106,9 @@ void aw_vibration_process(s16 tempt) {
 
       if (_data_cnt < numSamples) {
 #ifdef IS_USE_LSM6DSM
-        _zArray[_data_cnt] = acc;
+        _axisArray[_data_cnt] = acc;
 #else
-        _zArray[_data_cnt] = _acc_data.z;
+        _axisArray[_data_cnt] = _acc_data.z;
 #endif
       }
       _timerCallbackReached = 0;
@@ -122,8 +122,8 @@ void aw_vibration_process(s16 tempt) {
   if (fifo_data_cnt >= LSM6DSM_FIFO_DEPTH) {
     u16 i = 0;
     for (i = 0; i < numSamples; i++) {
-      s16 acc_z = lsm6dsm_read_accel(AW_Z_AXIS);
-      _zArray[i] = acc_z;
+      s16 acc = lsm6dsm_read_accel(axis);
+      _axisArray[i] = acc;
     }
   }
 
@@ -133,7 +133,6 @@ void aw_vibration_process(s16 tempt) {
 #else
   bmi160_accel_enable(0);
 #endif
-
   aw_delay_us(10);
   lsm6dsm_spi_close();
 #ifndef IS_USE_ACC_FIFO
@@ -152,32 +151,37 @@ void aw_vibration_process(s16 tempt) {
       if (i > 0) {
         aw_mqtt_pub_add_f(",");
       }
-      aw_mqtt_pub_add_f("%hX", _zArray[i + offset]);
+      aw_mqtt_pub_add_f("%hX", _axisArray[i + offset]);
     }
-    aw_mqtt_pub_add_f("\",i:%d,c:%d,a:3,t:%d}", offset, off, tempt);
+    if (j == 0 || j == size_cnt - 1) {
+      aw_mqtt_pub_add_f("\",i:%d,c:%d,a:%d,t:%d,csq:%d,bat:%d}", offset, off,
+                        axis, tempt, aw_mqtt_get_csq(), bat);
+    } else {
+      aw_mqtt_pub_add_f("\",i:%d,c:%d,a:%d}", offset, off, axis);
+    }
     aw_mqtt_pub_flush(
         AW_PUB_MODAL, QOS0_MOST_ONECE, NO_RETAIN,
         aw_mqtt_topic_get_f("" AW_DEV_RV "/%s/" AW_NOTIFY "", AW_MQTT_DEV_ID));
     offset = offset + off;
   }
-
   if (offset < numSamples) {
     aw_mqtt_pub_add_f("{v:\"");
     for (i = offset; i < numSamples; i++) {
       if (i > offset) {
         aw_mqtt_pub_add_f(",");
       }
-      aw_mqtt_pub_add_f("%hX", _zArray[i]);
+      aw_mqtt_pub_add_f("%hX", _axisArray[i]);
     }
-    aw_mqtt_pub_add_f("\",i:%d,c:%d,a:3,t:%d,csq:%d}", offset,
-                      (numSamples - offset), tempt, aw_mqtt_get_csq());
+    aw_mqtt_pub_add_f("\",i:%d,c:%d,a:%d,t:%d,csq:%d,bat:%d}", offset,
+                      (numSamples - offset), axis, tempt, aw_mqtt_get_csq(),
+                      bat);
     aw_mqtt_pub_flush(
         AW_PUB_MODAL, QOS0_MOST_ONECE, NO_RETAIN,
         aw_mqtt_topic_get_f("" AW_DEV_RV "/%s/" AW_NOTIFY "", AW_MQTT_DEV_ID));
   }
   u16 cnt = 0;
   for (cnt = 0; cnt < numSamples; cnt++) {
-    _zArray[cnt] = 0;
+    _axisArray[cnt] = 0;
   }
 #endif
 }

@@ -117,7 +117,6 @@ static s8 _process_sensor(u8 type, s16 val, u16 cnt) {
   _sensor.type = type;
   _sensor.cnt = cnt;
   _sensor.val = val;
-
 #ifdef IS_USE_MQTT
   _mqtt_pub_sensor(&_sensor);
 #endif
@@ -130,6 +129,8 @@ static s8 _process_sensor(u8 type, s16 val, u16 cnt) {
 #endif
 
 #ifdef IS_USE_POWER_CTL
+
+#ifdef IS_USE_POWER_SWITCH
 static void _power_switch_cb(void) {
   _events |= POWER_SWITCH_EVENT;
   if (NULL != _appSem) {
@@ -167,20 +168,20 @@ static void _proc_power_switch_event(void) {
   }
 }
 
+#endif
+
 static void _power_adc_cb(void) {
   _events |= POWER_ADC_EVENT;
   if (NULL != _appSem) {
     Semaphore_post(_appSem);
   }
 }
+
 #define _POWER_ADC_LOW true
+static u16 _bat_adc = 0;
 static void _proc_power_adc_event(void) {
-  if (_POWER_ADC_LOW == aw_power_adc_update(NULL)) {
-    _process_sensor(AW_DEV_TYPE, AW_DEV_LOWPOWER, ++_sensor_cnt);
-#ifdef IS_USE_LED
-    aw_blink_led(1, 100);
-#endif
-    aw_power_switch_set(AW_POWER_OFF);
+  if (_POWER_ADC_LOW == aw_power_adc_update(&_bat_adc)) {
+    //掉电提醒
   }
 }
 #endif
@@ -204,7 +205,7 @@ static void _proc_battery_timeout_event() { aw_batttey_update(); }
 
 #ifdef IS_USE_MQTT
 #if defined(IS_USE_RT) || defined(IS_USE_RV)
-
+static E_xyz_axis_t _v_axis = AW_Z_AXIS;
 #ifdef IS_USE_RVT_TIMER
 static int _rvt_report_time = 1800;  //上传周期
 #endif
@@ -223,7 +224,7 @@ static s8 _mqtt_lost_cb(const char *str) {
   }
   return 0;
 }
-static void _proc_mqtt_lost_event() { aw_mqtt_net_building(); }
+static void _proc_mqtt_lost_event() { aw_mqtt_net_building(AW_MQTT_NORMAL); }
 #endif
 
 #include "aw_json.h"
@@ -241,13 +242,13 @@ static s8 _mqtt_recv_cb(const char *str) {
 }
 static const aw_at_staist_t *_mqtt_statis = NULL;
 
-static void _mqtt_pub_flush_res() {
+static void _mqtt_pub_flush_res(char *dev_name) {
   aw_mqtt_pub_add_f("}");
   aw_mqtt_pub_flush(AW_PUB_MODAL, aw_mqtt_config_get()->qos, NO_RETAIN,
-                    aw_mqtt_topic_get_f("" AW_MQTT_DEV_NAME "/%s/" AW_RESULT "",
+                    aw_mqtt_topic_get_f("%s/%s/" AW_RESULT "", dev_name,
                                         AW_MQTT_DEV_ID));  //发送命令执行结果
 }
-static void _mqtt_pub_status_data() {
+static void _mqtt_pub_status_data(char *dev_name) {
 #ifdef IS_USE_LS  //使用本地开关
   const E_sw_sts_t *chs = NULL;
   chs = sw_get_chs();
@@ -288,12 +289,15 @@ static void _mqtt_pub_status_data() {
                 "{i:%d,y:%d,c1:%d,csq:%d,ver:%d}", AW_DEV_SELF_ADDRESS,
                 AW_DEV_TYPE, chs[AW_SW_CH1], aw_mqtt_get_csq(), AW_version_num);
 #else
-  aw_mqtt_pub_f(AW_PUB_MODAL, QOS0_MOST_ONECE, NO_RETAIN,
-                aw_mqtt_topic_get_f("" AW_MQTT_DEV_NAME "/%s/" AW_STATUS "",
-                                    AW_MQTT_DEV_ID),
-                "{i:%d,y:%d,csq:%d,rpt:%d,sip:%s,ver:%d}", AW_DEV_SELF_ADDRESS,
-                AW_DEV_TYPE, aw_mqtt_get_csq(), _rvt_report_time,
-                aw_mqtt_get_host(), AW_version_num);
+  s16 *vib_bias = aw_vibration_get_bias();
+  aw_mqtt_pub_f(
+      AW_PUB_MODAL, QOS0_MOST_ONECE, NO_RETAIN,
+      aw_mqtt_topic_get_f("%s/%s/" AW_STATUS "", dev_name, AW_MQTT_DEV_ID),
+      "{i:%d,y:%d,csq:%d,rpt:%d,sip:\"%s\",tbs:%d,vbs:\"%d,%d,%d\",bat:%d,ver:%"
+      "d}",
+      AW_DEV_SELF_ADDRESS, AW_DEV_TYPE, aw_mqtt_get_csq(), _rvt_report_time,
+      aw_mqtt_get_host(), aw_temper_get_bias(), vib_bias[0], vib_bias[1],
+      vib_bias[2], _bat_adc, AW_version_num);
 #endif
 }
 static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
@@ -316,10 +320,13 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           select_id = val;
         }
       }
+
       int cnt = 0;
+
       aw_mqtt_pub_add_f("{i:%d",
                         select_id > 0 ? select_id : AW_DEV_SELF_ADDRESS);
       cnt++;
+
       if (pStr = strstr(_json_str, QOS)) {  //信号质量配置
         if (sscanf(pStr - 1, "\"" QOS "\":%d", &val) == 1) {
           aw_mqtt_config_set_qos((aw_qos_t)val);
@@ -328,10 +335,11 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           } else {
             aw_mqtt_pub_add_f("{");
           }
-          aw_mqtt_pub_add_f("\"" QOS "\":%d", val);
+          aw_mqtt_pub_add_f("y:%d,\"" QOS "\":%d", AW_DEV_TYPE, val);
           cnt++;
         }
       }
+
 #ifdef IS_USE_RV
       if (pStr = strstr(_json_str, GET_VIBR)) {  //获取振动数据
         if (sscanf(pStr - 1, "\"" GET_VIBR "\":%d", &val) == 1) {
@@ -340,11 +348,28 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           } else {
             aw_mqtt_pub_add_f("{");
           }
-          aw_mqtt_pub_add_f("\"" GET_VIBR "\":%d", val);
-          _mqtt_pub_flush_res();    //发送命令执行结果
-          aw_vibration_process(0);  //读取振动数据并发送
+          aw_mqtt_pub_add_f("y:%d,\"" GET_VIBR "\":%d", AW_DEV_TYPE, val);
+          _mqtt_pub_flush_res(AW_DEV_RV);  //发送命令执行结果
+          s16 tempt = 0;
+          aw_temper_read(&tempt);  //读温度
+          aw_vibration_process((E_xyz_axis_t)val, tempt,
+                               _bat_adc);  //读取振动数据并发送
         }
       }
+
+      if (pStr = strstr(_json_str, AXIS_VIBR)) {  //获取振动数据
+        if (sscanf(pStr - 1, "\"" AXIS_VIBR "\":%d", &val) == 1) {
+          if (cnt > 0) {
+            aw_mqtt_pub_add_f(",");
+          } else {
+            aw_mqtt_pub_add_f("{");
+          }
+          aw_mqtt_pub_add_f("y:%d,\"" AXIS_VIBR "\":%d", AW_DEV_TYPE, val);
+          _mqtt_pub_flush_res(AW_DEV_RV);  //发送命令执行结果
+          _v_axis = (E_xyz_axis_t)val;
+        }
+      }
+
       if (pStr = strstr(_json_str, VIBR_BIAS)) {  //振动传感器校准
         if (sscanf(pStr - 1, "\"" VIBR_BIAS "\":%d", &val) == 1) {
           s16 *cal = NULL;
@@ -355,12 +380,13 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
             aw_mqtt_pub_add_f("{");
           }
           if (cal) {
-            aw_mqtt_pub_add_f("\"" VIBR_BIAS "\":[%d,%d,%d]", cal[0], cal[1],
-                              cal[2]);
+            aw_mqtt_pub_add_f("y:%d,\"" VIBR_BIAS "\":[%d,%d,%d]", AW_DEV_TYPE,
+                              cal[0], cal[1], cal[2]);
           }
-          cnt++;
+          _mqtt_pub_flush_res(AW_DEV_RV);  //发送命令执行结果
         }
       }
+
 #endif
 #ifdef IS_USE_RT
       if (pStr = strstr(_json_str, GET_TEMP)) {  //获取温度数据
@@ -370,13 +396,14 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           } else {
             aw_mqtt_pub_add_f("{");
           }
-          aw_mqtt_pub_add_f("\"" GET_TEMP "\":%d", val);
-          _mqtt_pub_flush_res();  //发送命令执行结果
+          aw_mqtt_pub_add_f("y:%d,\"" GET_TEMP "\":%d", AW_DEV_TYPE, val);
+          _mqtt_pub_flush_res(AW_DEV_RV);  //发送命令执行结果
           s16 tempt = 0;
           aw_temper_read(&tempt);  //读温度
           _process_sensor(AW_devtype_rt, tempt, 0);
         }
       }
+
       if (pStr = strstr(_json_str, TEMP_BIAS))  //温度修正
       {
         int temp_bias = 0;
@@ -387,8 +414,9 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           } else {
             aw_mqtt_pub_add_f("{");
           }
-          aw_mqtt_pub_add_f("\"" TEMP_BIAS "\":%d", temp_bias);
-          cnt++;
+          aw_mqtt_pub_add_f("y:%d,\"" TEMP_BIAS "\":%d", AW_DEV_TYPE,
+                            temp_bias);
+          _mqtt_pub_flush_res(AW_DEV_RV);  //发送命令执行结果
         }
       }
 #endif
@@ -404,8 +432,9 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           } else {
             aw_mqtt_pub_add_f("{");
           }
-          aw_mqtt_pub_add_f("\"" RVT_REPORT_TIME "\":%d", report_time);
-          cnt++;
+          aw_mqtt_pub_add_f("y:%d,\"" RVT_REPORT_TIME "\":%d", AW_DEV_TYPE,
+                            report_time);
+          _mqtt_pub_flush_res(AW_DEV_RV);  //发送命令执行结果
         }
       }
 #endif
@@ -419,13 +448,18 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           } else {
             aw_mqtt_pub_add_f("{");
           }
-          aw_mqtt_pub_add_f("\"" SERVER_IP "\":%s", host);
-          _mqtt_pub_flush_res();  //发送命令执行结果
+          aw_mqtt_pub_add_f("y:%d,\"" SERVER_IP "\":\"%s\"", AW_DEV_TYPE, host);
+          _mqtt_pub_flush_res(AW_DEV_RV);  //发送命令执行结果
           if (_is_key_set) {
-            aw_mqtt_set_keepAlive(600);  //设置长心跳包，用于低功耗
-            aw_mqtt_set_sub(0);          //不订阅消息
-            aw_mqtt_net_building();      //重连服务器
-            at_uart_close();             //关闭串口
+#ifdef IS_USE_NB_POWERDOWN
+            aw_mqtt_set_sub(0);  //不订阅消息
+            aw_mqtt_nb_close();
+#else
+            aw_mqtt_set_keepAlive(600);
+            aw_mqtt_set_sub(0);                   //不订阅消息
+            aw_mqtt_net_building(AW_MQTT_SLEEP);  //重连服务器
+            at_uart_close();                      //关闭串口
+#endif
             _is_key_set = false;
           }
         }
@@ -495,7 +529,7 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           } else {
             aw_mqtt_pub_add_f("{");
           }
-          aw_mqtt_pub_add_f("\"" SET_NET_LED "\":%d", val);
+          aw_mqtt_pub_add_f("y:%d,\"" SET_NET_LED "\":%d", AW_DEV_TYPE, val);
           cnt++;
         }
       }
@@ -507,7 +541,8 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           } else {
             aw_mqtt_pub_add_f("{");
           }
-          aw_mqtt_pub_add_f("\"" ATE "\":%d", val);
+
+          aw_mqtt_pub_add_f("y:%d,\"" ATE "\":%d", AW_DEV_TYPE, val);
           cnt++;
         }
       }
@@ -640,13 +675,17 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
 
 #else
       if (cnt > 1) {
-        _mqtt_pub_flush_res();  //发送命令执行结果
+        _mqtt_pub_flush_res(AW_MQTT_DEV_NAME);  //发送命令执行结果
       }
 #endif
       if (pStr = strstr(_json_str, STS)) {  //状态数据查询
         if (sscanf(pStr - 1, "\"" STS "\":%d", &val) == 1) {
           if (select_id == AW_DEV_SELF_ADDRESS) {
-            _mqtt_pub_status_data();
+#ifdef IS_USE_RV
+            _mqtt_pub_status_data(AW_DEV_RV);
+#else
+            _mqtt_pub_status_data(AW_MQTT_DEV_NAME);
+#endif
           } else if (select_id > 0) {
           }
         }
@@ -726,15 +765,20 @@ static void _proc_key_event() {
       return;
     }
   }
+
+  s16 tempt = 0;
+  s8 res = aw_temper_read(&tempt);  //读温度
+  if (res == -1) {
+    return;
+  }
   Timer_stop(&_rvt_clockS);  //开定时器
   aw_delay_ms(200);
   Timer_start(&_rvt_clockS);  //开定时器
   _is_key_set = true;
-
   at_uart_open();
   aw_mqtt_set_keepAlive(30);
   aw_mqtt_set_sub(1);  //订阅消息，用于配置
-  aw_mqtt_net_building();
+  aw_mqtt_net_building(AW_MQTT_CONFIG, 1, AW_DEV_RV);
 }
 
 static void _key_init() { key_init(_key_cb); }
@@ -750,8 +794,9 @@ static void _mqtt_init() {
   _mqtt_statis = aw_mqtt_statis_get();
 #endif
 
-#ifndef IS_USE_NB_POWERDOWN
-  aw_mqtt_net_building();  //连接服务器
+#if !defined(IS_USE_NB_POWERDOWN)
+  aw_mqtt_net_building(AW_MQTT_SLEEP, 1, );  //连接服务器
+  at_uart_close();                           //关闭串口
 #if !defined(IS_USE_RT) && !defined(IS_USE_RV)
   _mqtt_timer_init();
 #endif
@@ -833,14 +878,18 @@ static bool _is_temper_lost = false;
 static void _proc_rvt_timer_event() {
   int cnt = (_rvt_report_time) / (_RVT_TIME_BASE);
   _rvt_cnt++;
-
-  if (_is_key_set && uart_is_open() &&
-      _rvt_cnt > (AW_MIN(5, cnt)))  //配置按键是否按下
+  int time_cnt = AW_MIN(10, cnt);
+  if (_is_key_set && uart_is_open() && _rvt_cnt > time_cnt)  //配置按键是否按下
   {
+#ifdef IS_USE_NB_POWERDOWN
+    aw_mqtt_set_sub(0);  //不订阅消息
+    aw_mqtt_nb_close();
+#else
     aw_mqtt_set_keepAlive(600);
-    aw_mqtt_set_sub(0);      //不订阅消息
-    aw_mqtt_net_building();  //重连服务器
-    at_uart_close();         //关闭串口
+    aw_mqtt_set_sub(0);                   //不订阅消息
+    aw_mqtt_net_building(AW_MQTT_SLEEP);  //重连服务器
+    at_uart_close();                      //关闭串口
+#endif
     _is_key_set = false;
   }
 
@@ -855,46 +904,41 @@ static void _proc_rvt_timer_event() {
   if (res == -1)                    //读取失败
   {
     if (!_is_temper_lost) {
-#ifdef IS_USE_MQTT
-#ifdef IS_USE_NB_POWERDOWN
-      aw_mqtt_nb_open();
-#else
-      at_uart_open();   //打开串口
-#endif
-#endif
-      _process_sensor(AW_devtype_rt, tempt, ++_rvt_timer_cnt);
-#ifdef IS_USE_MQTT
-#ifdef IS_USE_NB_POWERDOWN
-      aw_mqtt_nb_close();
-#else
-      at_uart_close();  //关闭串口
-#endif
-#endif
+      //#ifdef IS_USE_MQTT
+      //#ifdef IS_USE_NB_POWERDOWN
+      //      aw_mqtt_nb_open();
+      //#else
+      //      at_uart_open();   //打开串口
+      //#endif
+      //#endif
+      //      _process_sensor(AW_devtype_rt, tempt, ++_rvt_timer_cnt);
+      //#ifdef IS_USE_MQTT
+      //#ifdef IS_USE_NB_POWERDOWN
+      //      aw_mqtt_nb_close();
+      //#else
+      //      at_uart_close();  //关闭串口
+      //#endif
+      //#endif
       _is_temper_lost = true;
     }
     return;
   } else {
     _is_temper_lost = false;
   }
+
 #ifdef IS_USE_MQTT
 #ifdef IS_USE_NB_POWERDOWN
   aw_mqtt_nb_open();
 #else
-  at_uart_open();       //打开串口
+  at_uart_open();   //打开串口
 #endif
 #endif
-  // read temperatuer
-  //_process_sensor(AW_devtype_rt, tempt,
-  //++_rvt_timer_cnt);  //读取温度数据，并发送
-
-  // read acc sensor
-  aw_vibration_process(tempt);  //读取振动数据，并发送
-
+  aw_vibration_process(_v_axis, tempt, _bat_adc);  //读取振动数据，并发送
 #ifdef IS_USE_MQTT
 #ifdef IS_USE_NB_POWERDOWN
   aw_mqtt_nb_close();
 #else
-  at_uart_close();      //关闭串口
+  at_uart_close();  //关闭串口
 #endif
 #endif
 }
@@ -937,14 +981,18 @@ static void _proc_events() {  //事件处理
 #endif
 
 #ifdef IS_USE_POWER_CTL
+
+#ifdef IS_USE_POWER_SWITCH
   if (_events & POWER_SWITCH_EVENT) {
     _proc_power_switch_event();
     Util_clearEvent(&_events, POWER_SWITCH_EVENT);
   }
+#endif
   if (_events & POWER_ADC_EVENT) {
     _proc_power_adc_event();
     Util_clearEvent(&_events, POWER_ADC_EVENT);
   }
+
 #endif
 
 #ifdef IS_USE_IMU
@@ -967,7 +1015,6 @@ static void _proc_events() {  //事件处理
     _proc_rvt_timer_event();
     Util_clearEvent(&_events, RVT_TIMER_EVENT);
   }
-
   if (_events & KEY_EVENT) {  //按键事件
     _proc_key_event();
     Util_clearEvent(&_events, KEY_EVENT);
@@ -978,10 +1025,6 @@ static void _proc_events() {  //事件处理
 
 static void _app_init() {
   _app_sem_init();  //信号初始化
-
-#ifdef IS_USE_POWER_CTL
-  aw_power_init(_power_switch_cb, _power_adc_cb);  //电压检测
-#endif
 
 #ifdef IS_USE_OLED
   aw_oled_init();
@@ -994,8 +1037,6 @@ static void _app_init() {
 
 #ifdef IS_USE_RT
   aw_temper_init();  //温度传感器初始化
-  s16 val = 0;
-  aw_temper_read(&val);
 #endif
 
 #ifdef IS_USE_RV
@@ -1039,9 +1080,7 @@ static void _app_init() {
   _mqtt_init();  // mqtt初始化
 #if defined(IS_USE_RT) || defined(IS_USE_RV)
   _key_init();  //按键初始化
-#if !defined(IS_USE_NB_POWERDOWN)
-  at_uart_close();  //关闭串口
-#endif
+
 #endif
 #endif
 
@@ -1052,11 +1091,16 @@ static void _app_init() {
 #ifdef IS_USE_LED
   aw_toggle_led();
 #endif
-
   aw_delay_ms(1000);
 #if defined(IS_USE_RT) || defined(IS_USE_RV)
 #ifdef IS_USE_RVT_TIMER
   _rvt_timer_init();  //震动温度周期定时器初始化
+#endif
+#endif
+
+#ifdef IS_USE_POWER_CTL
+#ifdef IS_USE_POWER_ADC
+  aw_power_init(NULL, _power_adc_cb);  //电压检测
 #endif
 #endif
 }
