@@ -320,13 +320,10 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           select_id = val;
         }
       }
-
       int cnt = 0;
-
       aw_mqtt_pub_add_f("{i:%d",
                         select_id > 0 ? select_id : AW_DEV_SELF_ADDRESS);
       cnt++;
-
       if (pStr = strstr(_json_str, QOS)) {  //信号质量配置
         if (sscanf(pStr - 1, "\"" QOS "\":%d", &val) == 1) {
           aw_mqtt_config_set_qos((aw_qos_t)val);
@@ -339,7 +336,6 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           cnt++;
         }
       }
-
 #ifdef IS_USE_RV
       if (pStr = strstr(_json_str, GET_VIBR)) {  //获取振动数据
         if (sscanf(pStr - 1, "\"" GET_VIBR "\":%d", &val) == 1) {
@@ -369,7 +365,6 @@ static void _proc_mqtt_recv_event() {                 // mqtt 数据接收处理事件
           _v_axis = (E_xyz_axis_t)val;
         }
       }
-
       if (pStr = strstr(_json_str, VIBR_BIAS)) {  //振动传感器校准
         if (sscanf(pStr - 1, "\"" VIBR_BIAS "\":%d", &val) == 1) {
           s16 *cal = NULL;
@@ -1080,7 +1075,6 @@ static void _app_init() {
   _mqtt_init();  // mqtt初始化
 #if defined(IS_USE_RT) || defined(IS_USE_RV)
   _key_init();  //按键初始化
-
 #endif
 #endif
 
