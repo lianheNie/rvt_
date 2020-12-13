@@ -126,7 +126,6 @@ void aw_vibration_process(E_xyz_axis_t axis, s16 tempt, u16 bat) {
       _axisArray[i] = acc;
     }
   }
-
 #endif
 #ifdef IS_USE_LSM6DSM
   lsm6dsm_accel_enable(0);
