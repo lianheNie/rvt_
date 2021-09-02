@@ -56,7 +56,7 @@
 #define IS_USE_4X4_PACKAGE  // 4X4封裝
 #endif
 ///////////////////////////////////////////////////////////////////////////
-#define AW_DEV_SELF_ADDRESS 2102       // 1103        //   36 设备地址
+#define AW_DEV_SELF_ADDRESS 2121       // 1103        //   36 设备地址
 #define AW_DEV_PAIR_DEFAULT_ADDRESS 0  //设备配对地址
 #define AW_MQTT_HOST "106.14.123.177"  //"106.14.192.13"
 #define AW_MQTT_DEV_NAME "GAT"

@@ -13,7 +13,7 @@
 	<ignoreDefaultDeviceSettings value="true"/>
 	<ignoreDefaultCCSSettings value="true"/>
 	<templateProperties value="id=uartecho_CC2640R2_LAUNCHXL_tirtos_ccs.projectspec.uartecho_CC2640R2_LAUNCHXL_tirtos_ccs,buildProfile=release,isHybrid=true"/>
-	<origin value="D:/aw_iot_rvt"/>
+	<origin value="D:/workspace_v10/aw_iot_rvt"/>
 	<filesToOpen value=""/>
 	<isTargetManual value="false"/>
 </projectOptions>
